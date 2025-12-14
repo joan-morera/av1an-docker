@@ -1,0 +1,253 @@
+name: Build and Publish Av1an
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * *' ### Runs every day at 0 AM UTC
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  check-base-packages:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.check_changes.outputs.changed }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Docker
+        uses: docker/setup-docker-action@v4
+      - name: Generate temporary Dockerfile
+        run: |
+          docker pull debian:sid-slim
+          echo "FROM debian:sid-slim" > Dockerfile.temp
+          echo "RUN apt-get update && apt-get upgrade -y && apt-get install -y \\" >> Dockerfile.temp
+          echo "    build-essential \\" >> Dockerfile.temp
+          echo "    clang \\" >> Dockerfile.temp
+          echo "    nasm \\" >> Dockerfile.temp
+          echo "    yasm \\" >> Dockerfile.temp
+          echo "    meson \\" >> Dockerfile.temp
+          echo "    ninja-build \\" >> Dockerfile.temp
+          echo "    cython3 \\" >> Dockerfile.temp
+          echo "    ffmpeg \\" >> Dockerfile.temp
+          echo "    aom-tools \\" >> Dockerfile.temp
+          echo "    svt-av1 \\" >> Dockerfile.temp
+          echo "    rav1e \\" >> Dockerfile.temp
+          echo "    librav1e-dev \\" >> Dockerfile.temp
+          echo "    libssl-dev \\" >> Dockerfile.temp
+          echo "    libsvtav1enc-dev \\" >> Dockerfile.temp
+          echo "    libzimg-dev \\" >> Dockerfile.temp
+          echo "    python3-dev \\" >> Dockerfile.temp
+          echo "    mkvtoolnix \\" >> Dockerfile.temp
+          echo "    libvpx-dev \\" >> Dockerfile.temp
+          echo "    libffms2-dev \\" >> Dockerfile.temp
+          echo "    ffmsindex \\" >> Dockerfile.temp
+          echo "    zlib1g-dev \\" >> Dockerfile.temp
+          echo "    && rm -rf /var/lib/apt/lists/*" >> Dockerfile.temp
+
+      - name: Build temporary image
+        run: docker build -f Dockerfile.temp -t temp-check-image .
+
+      - name: Extract package versions
+        run: docker run --rm temp-check-image dpkg-query -W -f='${Package}-${Version}\n' | grep -E "^(ffmpeg|aom-tools|svt-av1|rav1e|libc6|build-essential|clang|nasm|yasm|meson|ninja-build|cython3|libssl-dev|libzimg-dev|python3-dev|zlib1g-dev|libsvtav1enc-dev|librav1e-dev|mkvtoolnix|libvpx-dev|libffms2-dev|ffmsindex)" | sort > current-packages.txt
+
+      - name: Cleanup
+        run: rm Dockerfile.temp
+      - name: Compare with stored package list
+        id: check_changes
+        run: |
+          if [ ! -f package-versions.txt ]; then
+            echo "package-versions.txt does not exist, treating as changed"
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            
+            ### Filter out custom lines to get package list
+            sed -n '/### Build Dependencies/,$p' package-versions.txt | grep -v "###" | grep -v "^$" | sort > stored-packages.txt
+            
+            if ! cmp -s stored-packages.txt current-packages.txt; then
+              echo "Package list has changed."
+              echo "changed=true" >> $GITHUB_OUTPUT
+            else
+              echo "Package list has not changed."
+              echo "changed=false" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+  check-versions:
+    runs-on: ubuntu-latest
+    outputs:
+      new_version_detected: ${{ steps.check.outputs.new_version_detected }}
+      ### Latest tags
+      latest_av1an_tag: ${{ steps.get_av1an.outputs.version }}
+      latest_vapoursynth_tag: ${{ steps.get_vapoursynth.outputs.version }}
+      latest_vmaf_tag: ${{ steps.get_vmaf.outputs.version }}
+      latest_rust_tag: ${{ steps.get_rust.outputs.version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get latest Av1an version
+        id: get_av1an
+        run: |
+          AV1AN_LATEST=$(git ls-remote --tags --sort='v:refname' https://github.com/master-of-zen/Av1an.git | grep -v "\^{}" | grep -E "refs/tags/[v]?0\.[0-9]+" | tail -n1 | sed 's/.*\///')
+          if [ -z "$AV1AN_LATEST" ]; then AV1AN_LATEST="master-$(date +%Y%m%d)"; fi
+          echo "version=${AV1AN_LATEST}" >> $GITHUB_OUTPUT
+
+      - name: Get latest VapourSynth version
+        id: get_vapoursynth
+        run: |
+          VS_LATEST=$(git ls-remote --tags --sort='v:refname' https://github.com/vapoursynth/vapoursynth.git | grep -E "refs/tags/R70(\.[0-9]+)?$" | tail -n1 | sed 's/.*\///')
+          echo "version=${VS_LATEST}" >> $GITHUB_OUTPUT
+
+      - name: Get latest VMAF version
+        id: get_vmaf
+        run: |
+          VMAF_LATEST=$(git ls-remote --tags --sort='v:refname' https://github.com/Netflix/vmaf.git | grep "refs/tags/v" | tail -n1 | sed 's/.*\///')
+          echo "version=${VMAF_LATEST}" >> $GITHUB_OUTPUT
+
+      - name: Get latest Rust version
+        id: get_rust
+        run: |
+          RUST_LATEST=$(curl -s https://static.rust-lang.org/dist/channel-rust-stable.toml | grep "version =" | head -1 | cut -d'"' -f2 | cut -d' ' -f1)
+          echo "version=${RUST_LATEST}" >> $GITHUB_OUTPUT
+
+      - name: Check for new versions
+        id: check
+        run: |
+          if [ ! -f package-versions.txt ]; then
+            echo "new_version_detected=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          CUR_AV1AN=$(grep "^av1an-" package-versions.txt | cut -d- -f2-)
+          CUR_VS=$(grep "^vapoursynth-" package-versions.txt | cut -d- -f2-)
+          CUR_VMAF=$(grep "^vmaf-" package-versions.txt | cut -d- -f2-)
+          CUR_RUST=$(grep "^rust-" package-versions.txt | cut -d- -f2-)
+
+          NEW_AV1AN="${{ steps.get_av1an.outputs.version }}"
+          NEW_VS="${{ steps.get_vapoursynth.outputs.version }}"
+          NEW_VMAF="${{ steps.get_vmaf.outputs.version }}"
+          NEW_RUST="${{ steps.get_rust.outputs.version }}"
+          
+          if [ "$NEW_AV1AN" != "$CUR_AV1AN" ] || [ "$NEW_VS" != "$CUR_VS" ] || [ "$NEW_VMAF" != "$CUR_VMAF" ] || [ "$NEW_RUST" != "$CUR_RUST" ]; then
+            echo "new_version_detected=true" >> $GITHUB_OUTPUT
+          else
+            echo "new_version_detected=false" >> $GITHUB_OUTPUT
+          fi
+
+  build-images:
+    needs: [check-base-packages, check-versions]
+    if: needs.check-base-packages.outputs.changed == 'true' || needs.check-versions.outputs.new_version_detected == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            tag_suffix: amd64
+          - platform: linux/arm64
+            tag_suffix: arm64
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Log in to the GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Av1an (${{ matrix.tag_suffix }})
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile
+          platforms: ${{ matrix.platform }}
+          push: true
+          provenance: false
+          build-args: |
+             AV1AN_VERSION=${{ needs.check-versions.outputs.latest_av1an_tag }}
+             VAPOURSYNTH_VERSION=${{ needs.check-versions.outputs.latest_vapoursynth_tag }}
+             VMAF_VERSION=${{ needs.check-versions.outputs.latest_vmaf_tag }}
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/av1an:${{ matrix.tag_suffix }}
+            ${{ matrix.tag_suffix == 'amd64' && format('ghcr.io/{0}/av1an:latest', github.repository_owner) || '' }}
+          cache-from: type=gha,scope=build-${{ matrix.tag_suffix }}
+          cache-to: type=gha,mode=min,scope=build-${{ matrix.tag_suffix }}
+
+  update-repo:
+    needs: [check-base-packages, check-versions, build-images]
+    if: needs.check-base-packages.outputs.changed == 'true' || needs.check-versions.outputs.new_version_detected == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update version file
+        run: |
+          
+          ### Re-generate package list if bases changed (using amd64 as reference)
+          if [ "${{ needs.check-base-packages.outputs.changed }}" = "true" ]; then
+            echo "FROM debian:sid-slim" > Dockerfile.temp
+            echo "RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \\" >> Dockerfile.temp
+            echo "    build-essential \\" >> Dockerfile.temp
+            echo "    clang \\" >> Dockerfile.temp
+            echo "    nasm \\" >> Dockerfile.temp
+            echo "    yasm \\" >> Dockerfile.temp
+            echo "    meson \\" >> Dockerfile.temp
+            echo "    ninja-build \\" >> Dockerfile.temp
+            echo "    cython3 \\" >> Dockerfile.temp
+            echo "    ffmpeg \\" >> Dockerfile.temp
+            echo "    aom-tools \\" >> Dockerfile.temp
+            echo "    svt-av1 \\" >> Dockerfile.temp
+            echo "    rav1e \\" >> Dockerfile.temp
+            echo "    libc6 \\" >> Dockerfile.temp
+            echo "    librav1e-dev \\" >> Dockerfile.temp
+            echo "    libssl-dev \\" >> Dockerfile.temp
+            echo "    libsvtav1enc-dev \\" >> Dockerfile.temp
+            echo "    libzimg-dev \\" >> Dockerfile.temp
+            echo "    python3-dev \\" >> Dockerfile.temp
+            echo "    mkvtoolnix \\" >> Dockerfile.temp
+            echo "    libvpx-dev \\" >> Dockerfile.temp
+            echo "    libffms2-dev \\" >> Dockerfile.temp
+            echo "    ffmsindex \\" >> Dockerfile.temp
+            echo "    zlib1g-dev \\" >> Dockerfile.temp
+            echo "    && rm -rf /var/lib/apt/lists/*" >> Dockerfile.temp
+
+            docker build -f Dockerfile.temp -t temp-check-image-final .
+            
+            ### Extract relevant package versions
+            docker run --rm temp-check-image-final dpkg-query -W -f='${Package}-${Version}\n' | grep -E "^(ffmpeg|aom-tools|svt-av1|rav1e|libc6|build-essential|clang|nasm|yasm|meson|ninja-build|cython3|libssl-dev|libzimg-dev|python3-dev|zlib1g-dev|libsvtav1enc-dev|librav1e-dev|mkvtoolnix|libvpx-dev|libffms2-dev|ffmsindex)" | sort > packages-temp.txt
+            rm Dockerfile.temp
+          else
+            sed -n '/### Build Dependencies/,$p' package-versions.txt | grep -v "###" | grep -v "^$" > packages-temp.txt
+          fi
+
+          echo "### Main Application Versions (Git Tags)" > package-versions.txt
+          echo "av1an-${{ needs.check-versions.outputs.latest_av1an_tag }}" >> package-versions.txt
+          echo "vapoursynth-${{ needs.check-versions.outputs.latest_vapoursynth_tag }}" >> package-versions.txt
+          echo "vmaf-${{ needs.check-versions.outputs.latest_vmaf_tag }}" >> package-versions.txt
+          echo "rust-${{ needs.check-versions.outputs.latest_rust_tag }}" >> package-versions.txt
+          echo "" >> package-versions.txt
+          echo "### Build Dependencies (Debian Sid)" >> package-versions.txt
+          echo "### Automatically populated by workflow. Tracks libs and toolchain." >> package-versions.txt
+          
+          cat packages-temp.txt >> package-versions.txt
+          rm packages-temp.txt
+
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          git add package-versions.txt
+          if ! git diff --staged --quiet; then
+            git commit -m "ci: Update Av1an packages and versions"
+            git pull --rebase
+            git push
+          fi
