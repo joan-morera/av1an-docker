@@ -177,7 +177,7 @@ jobs:
              VMAF_VERSION=${{ needs.check-versions.outputs.latest_vmaf_tag }}
           tags: |
             ghcr.io/${{ github.repository_owner }}/av1an:${{ matrix.tag_suffix }}
-            ${{ matrix.tag_suffix == 'amd64' && format('ghcr.io/{0}/av1an:latest', github.repository_owner) || '' }}
+            ghcr.io/${{ github.repository_owner }}/av1an:${{ matrix.tag_suffix }}
           cache-from: type=gha,scope=build-${{ matrix.tag_suffix }}
           cache-to: type=gha,mode=min,scope=build-${{ matrix.tag_suffix }}
 
@@ -251,3 +251,22 @@ jobs:
             git pull --rebase
             git push
           fi
+
+  merge-tags:
+    needs: [build-images]
+    if: needs.build-images.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Log in to the GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create and push manifest for latest
+        run: |
+          docker buildx imagetools create -t ghcr.io/${{ github.repository_owner }}/av1an:latest \
+            ghcr.io/${{ github.repository_owner }}/av1an:amd64 \
+            ghcr.io/${{ github.repository_owner }}/av1an:arm64
+
