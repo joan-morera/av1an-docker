@@ -112,11 +112,26 @@ jobs:
           VMAF_LATEST=$(git ls-remote --tags --sort='v:refname' https://github.com/Netflix/vmaf.git | grep "refs/tags/v" | tail -n1 | sed 's/.*\///')
           echo "version=${VMAF_LATEST}" >> $GITHUB_OUTPUT
 
-      - name: Get latest Rust version
+      - name: Get Rust version from Av1an
         id: get_rust
         run: |
-          RUST_LATEST=$(curl -s https://static.rust-lang.org/dist/channel-rust-stable.toml | grep -A 1 "\[pkg.rust\]" | grep "version =" | cut -d'"' -f2 | cut -d' ' -f1)
-          echo "version=${RUST_LATEST}" >> $GITHUB_OUTPUT
+          AV1AN_VERSION="${{ steps.get_av1an.outputs.version }}"
+          # Fallback to master if version is empty/malformed, though get_av1an handles this.
+          URL="https://raw.githubusercontent.com/master-of-zen/Av1an/${AV1AN_VERSION}/rust-toolchain.toml"
+          
+          echo "Fetching Rust version from: $URL"
+          
+          # Try fetching the toml file. If it fails (e.g. older versions didn't have it), fallback or error?
+          # For now, assuming it exists as confirmed.
+          RUST_CHANNEL=$(curl -sL "$URL" | grep "channel =" | cut -d'"' -f2)
+          
+          if [ -z "$RUST_CHANNEL" ]; then
+             echo "Could not parse channel from rust-toolchain.toml, defaulting to stable"
+             RUST_CHANNEL="stable"
+          fi
+          
+          echo "Detected Rust channel: $RUST_CHANNEL"
+          echo "version=${RUST_CHANNEL}" >> $GITHUB_OUTPUT
 
       - name: Check for new versions
         id: check
