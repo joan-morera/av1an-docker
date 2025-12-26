@@ -83,7 +83,7 @@ jobs:
       latest_av1an_tag: ${{ steps.get_av1an.outputs.version }}
       latest_vapoursynth_tag: ${{ steps.get_vapoursynth.outputs.version }}
       latest_vmaf_tag: ${{ steps.get_vmaf.outputs.version }}
-      latest_rust_tag: ${{ steps.get_rust.outputs.version }}
+
       current_date: ${{ steps.get_date.outputs.date }}
     steps:
       - name: Checkout repository
@@ -112,26 +112,7 @@ jobs:
           VMAF_LATEST=$(git ls-remote --tags --sort='v:refname' https://github.com/Netflix/vmaf.git | grep "refs/tags/v" | tail -n1 | sed 's/.*\///')
           echo "version=${VMAF_LATEST}" >> $GITHUB_OUTPUT
 
-      - name: Get Rust version from Av1an
-        id: get_rust
-        run: |
-          AV1AN_VERSION="${{ steps.get_av1an.outputs.version }}"
-          # Fallback to master if version is empty/malformed, though get_av1an handles this.
-          URL="https://raw.githubusercontent.com/master-of-zen/Av1an/${AV1AN_VERSION}/rust-toolchain.toml"
-          
-          echo "Fetching Rust version from: $URL"
-          
-          # Try fetching the toml file. If it fails (e.g. older versions didn't have it), fallback or error?
-          # For now, assuming it exists as confirmed.
-          RUST_CHANNEL=$(curl -sL "$URL" | grep "channel =" | cut -d'"' -f2)
-          
-          if [ -z "$RUST_CHANNEL" ]; then
-             echo "Could not parse channel from rust-toolchain.toml, defaulting to stable"
-             RUST_CHANNEL="stable"
-          fi
-          
-          echo "Detected Rust channel: $RUST_CHANNEL"
-          echo "version=${RUST_CHANNEL}" >> $GITHUB_OUTPUT
+
 
       - name: Check for new versions
         id: check
@@ -144,14 +125,12 @@ jobs:
           CUR_AV1AN=$(grep "^av1an-" package-versions.txt | cut -d- -f2-)
           CUR_VS=$(grep "^vapoursynth-" package-versions.txt | cut -d- -f2-)
           CUR_VMAF=$(grep "^vmaf-" package-versions.txt | cut -d- -f2-)
-          CUR_RUST=$(grep "^rust-" package-versions.txt | cut -d- -f2-)
 
           NEW_AV1AN="${{ steps.get_av1an.outputs.version }}"
           NEW_VS="${{ steps.get_vapoursynth.outputs.version }}"
           NEW_VMAF="${{ steps.get_vmaf.outputs.version }}"
-          NEW_RUST="${{ steps.get_rust.outputs.version }}"
           
-          if [ "$NEW_AV1AN" != "$CUR_AV1AN" ] || [ "$NEW_VS" != "$CUR_VS" ] || [ "$NEW_VMAF" != "$CUR_VMAF" ] || [ "$NEW_RUST" != "$CUR_RUST" ]; then
+          if [ "$NEW_AV1AN" != "$CUR_AV1AN" ] || [ "$NEW_VS" != "$CUR_VS" ] || [ "$NEW_VMAF" != "$CUR_VMAF" ]; then
             echo "new_version_detected=true" >> $GITHUB_OUTPUT
           else
             echo "new_version_detected=false" >> $GITHUB_OUTPUT
@@ -257,7 +236,7 @@ jobs:
           echo "av1an-${{ needs.check-versions.outputs.latest_av1an_tag }}" >> package-versions.txt
           echo "vapoursynth-${{ needs.check-versions.outputs.latest_vapoursynth_tag }}" >> package-versions.txt
           echo "vmaf-${{ needs.check-versions.outputs.latest_vmaf_tag }}" >> package-versions.txt
-          echo "rust-${{ needs.check-versions.outputs.latest_rust_tag }}" >> package-versions.txt
+
           echo "" >> package-versions.txt
           echo "### Build Dependencies (Debian Sid)" >> package-versions.txt
           echo "### Automatically populated by workflow. Tracks libs and toolchain." >> package-versions.txt
