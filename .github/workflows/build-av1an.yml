@@ -19,42 +19,24 @@ jobs:
         uses: actions/checkout@v4
       - name: Set up Docker
         uses: docker/setup-docker-action@v4
-      - name: Generate temporary Dockerfile
-        run: |
-          docker pull debian:sid-slim
-          echo "FROM debian:sid-slim" > Dockerfile.temp
-          echo "RUN apt-get update && apt-get upgrade -y && apt-get install -y \\" >> Dockerfile.temp
-          echo "    build-essential \\" >> Dockerfile.temp
-          echo "    clang \\" >> Dockerfile.temp
-          echo "    nasm \\" >> Dockerfile.temp
-          echo "    yasm \\" >> Dockerfile.temp
-          echo "    meson \\" >> Dockerfile.temp
-          echo "    ninja-build \\" >> Dockerfile.temp
-          echo "    cython3 \\" >> Dockerfile.temp
-          echo "    ffmpeg \\" >> Dockerfile.temp
-          echo "    aom-tools \\" >> Dockerfile.temp
-          echo "    svt-av1 \\" >> Dockerfile.temp
-          echo "    rav1e \\" >> Dockerfile.temp
-          echo "    librav1e-dev \\" >> Dockerfile.temp
-          echo "    libssl-dev \\" >> Dockerfile.temp
-          echo "    libsvtav1enc-dev \\" >> Dockerfile.temp
-          echo "    libzimg-dev \\" >> Dockerfile.temp
-          echo "    python3-dev \\" >> Dockerfile.temp
-          echo "    mkvtoolnix \\" >> Dockerfile.temp
-          echo "    libvpx-dev \\" >> Dockerfile.temp
-          echo "    libffms2-dev \\" >> Dockerfile.temp
-          echo "    ffmsindex \\" >> Dockerfile.temp
-          echo "    zlib1g-dev \\" >> Dockerfile.temp
-          echo "    && rm -rf /var/lib/apt/lists/*" >> Dockerfile.temp
-
-      - name: Build temporary image
-        run: docker build -f Dockerfile.temp -t temp-check-image .
-
       - name: Extract package versions
-        run: docker run --rm temp-check-image dpkg-query -W -f='${Package}-${Version}\n' | grep -E "^(ffmpeg|aom-tools|svt-av1|rav1e|libc6|build-essential|clang|nasm|yasm|meson|ninja-build|cython3|libssl-dev|libzimg-dev|python3-dev|zlib1g-dev|libsvtav1enc-dev|librav1e-dev|mkvtoolnix|libvpx-dev|libffms2-dev|ffmsindex)" | sort > current-packages.txt
-
-      - name: Cleanup
-        run: rm Dockerfile.temp
+        id: extract_versions
+        run: |
+          # Package list to check
+          PACKAGES="ffmpeg aom-tools svt-av1 rav1e libc6 build-essential clang nasm yasm meson ninja-build cython3 libssl-dev libzimg-dev python3-dev zlib1g-dev libsvtav1enc-dev librav1e-dev mkvtoolnix libvpx-dev libffms2-dev ffmsindex"
+          
+          # Run apt-cache policy in a fresh container (fast, no install)
+          docker run --rm debian:sid-slim sh -c "apt-get update -qq && apt-cache policy $PACKAGES" > raw_policy.txt
+          
+          # Parse the output to format: Package-Version
+          # apt-cache policy output format:
+          # package:
+          #   Installed: (none)
+          #   Candidate: version
+          awk '/^[^ ]/ {pkg=$1; sub(/:$/,"",pkg)} /Candidate:/ {print pkg "-" $2}' raw_policy.txt | sort > current-packages.txt
+          
+          echo "Detected versions:"
+          cat current-packages.txt
       - name: Compare with stored package list
         id: check_changes
         run: |
@@ -196,38 +178,17 @@ jobs:
           
           ### Re-generate package list if bases changed (using amd64 as reference)
           if [ "${{ needs.check-base-packages.outputs.changed }}" = "true" ]; then
-            docker pull debian:sid-slim
-            echo "FROM debian:sid-slim" > Dockerfile.temp
-            echo "RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \\" >> Dockerfile.temp
-            echo "    build-essential \\" >> Dockerfile.temp
-            echo "    clang \\" >> Dockerfile.temp
-            echo "    nasm \\" >> Dockerfile.temp
-            echo "    yasm \\" >> Dockerfile.temp
-            echo "    meson \\" >> Dockerfile.temp
-            echo "    ninja-build \\" >> Dockerfile.temp
-            echo "    cython3 \\" >> Dockerfile.temp
-            echo "    ffmpeg \\" >> Dockerfile.temp
-            echo "    aom-tools \\" >> Dockerfile.temp
-            echo "    svt-av1 \\" >> Dockerfile.temp
-            echo "    rav1e \\" >> Dockerfile.temp
-            echo "    libc6 \\" >> Dockerfile.temp
-            echo "    librav1e-dev \\" >> Dockerfile.temp
-            echo "    libssl-dev \\" >> Dockerfile.temp
-            echo "    libsvtav1enc-dev \\" >> Dockerfile.temp
-            echo "    libzimg-dev \\" >> Dockerfile.temp
-            echo "    python3-dev \\" >> Dockerfile.temp
-            echo "    mkvtoolnix \\" >> Dockerfile.temp
-            echo "    libvpx-dev \\" >> Dockerfile.temp
-            echo "    libffms2-dev \\" >> Dockerfile.temp
-            echo "    ffmsindex \\" >> Dockerfile.temp
-            echo "    zlib1g-dev \\" >> Dockerfile.temp
-            echo "    && rm -rf /var/lib/apt/lists/*" >> Dockerfile.temp
-
-            docker build -f Dockerfile.temp -t temp-check-image-final .
+            # Package list to check
+            PACKAGES="ffmpeg aom-tools svt-av1 rav1e libc6 build-essential clang nasm yasm meson ninja-build cython3 libssl-dev libzimg-dev python3-dev zlib1g-dev libsvtav1enc-dev librav1e-dev mkvtoolnix libvpx-dev libffms2-dev ffmsindex"
             
-            ### Extract relevant package versions
-            docker run --rm temp-check-image-final dpkg-query -W -f='${Package}-${Version}\n' | grep -E "^(ffmpeg|aom-tools|svt-av1|rav1e|libc6|build-essential|clang|nasm|yasm|meson|ninja-build|cython3|libssl-dev|libzimg-dev|python3-dev|zlib1g-dev|libsvtav1enc-dev|librav1e-dev|mkvtoolnix|libvpx-dev|libffms2-dev|ffmsindex)" | sort > packages-temp.txt
-            rm Dockerfile.temp
+            # Run apt-cache policy in a fresh container
+            # Using docker pull to ensure we have the absolute latest base image before checking
+            docker pull debian:sid-slim
+            docker run --rm debian:sid-slim sh -c "apt-get update -qq && apt-cache policy $PACKAGES" > raw_policy.txt
+            
+            # Parse output
+            awk '/^[^ ]/ {pkg=$1; sub(/:$/,"",pkg)} /Candidate:/ {print pkg "-" $2}' raw_policy.txt | sort > packages-temp.txt
+            rm raw_policy.txt
           else
             sed -n '/### Build Dependencies/,$p' package-versions.txt | grep -v "###" | grep -v "^$" > packages-temp.txt
           fi
