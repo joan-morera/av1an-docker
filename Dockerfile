@@ -5,6 +5,8 @@
 ### Update system and install all build dependencies in one go
 FROM debian:sid-slim AS builder
 
+ARG BUILD_DATE
+
 RUN apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y --no-install-recommends \
@@ -149,6 +151,8 @@ RUN strip /usr/local/bin/av1an
 
 ### Stage 2: Runtime
 FROM debian:sid-slim
+
+ARG BUILD_DATE
 
 ### Install runtime dependencies
 ### Update system and install all runtime dependencies in one go

@@ -84,9 +84,14 @@ jobs:
       latest_vapoursynth_tag: ${{ steps.get_vapoursynth.outputs.version }}
       latest_vmaf_tag: ${{ steps.get_vmaf.outputs.version }}
       latest_rust_tag: ${{ steps.get_rust.outputs.version }}
+      current_date: ${{ steps.get_date.outputs.date }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Get current date
+        id: get_date
+        run: echo "date=$(date -u +%Y-%m-%d)" >> $GITHUB_OUTPUT
 
       - name: Get latest Av1an version
         id: get_av1an
@@ -110,7 +115,7 @@ jobs:
       - name: Get latest Rust version
         id: get_rust
         run: |
-          RUST_LATEST=$(curl -s https://static.rust-lang.org/dist/channel-rust-stable.toml | grep "version =" | head -1 | cut -d'"' -f2 | cut -d' ' -f1)
+          RUST_LATEST=$(curl -s https://static.rust-lang.org/dist/channel-rust-stable.toml | grep -A 1 "\[pkg.rust\]" | grep "version =" | cut -d'"' -f2 | cut -d' ' -f1)
           echo "version=${RUST_LATEST}" >> $GITHUB_OUTPUT
 
       - name: Check for new versions
@@ -175,6 +180,7 @@ jobs:
              AV1AN_VERSION=${{ needs.check-versions.outputs.latest_av1an_tag }}
              VAPOURSYNTH_VERSION=${{ needs.check-versions.outputs.latest_vapoursynth_tag }}
              VMAF_VERSION=${{ needs.check-versions.outputs.latest_vmaf_tag }}
+             BUILD_DATE=${{ needs.check-versions.outputs.current_date }}
           tags: |
             ghcr.io/${{ github.repository_owner }}/av1an:${{ matrix.tag_suffix }}
             ghcr.io/${{ github.repository_owner }}/av1an:${{ matrix.tag_suffix }}
@@ -196,6 +202,7 @@ jobs:
           
           ### Re-generate package list if bases changed (using amd64 as reference)
           if [ "${{ needs.check-base-packages.outputs.changed }}" = "true" ]; then
+            docker pull debian:sid-slim
             echo "FROM debian:sid-slim" > Dockerfile.temp
             echo "RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \\" >> Dockerfile.temp
             echo "    build-essential \\" >> Dockerfile.temp
