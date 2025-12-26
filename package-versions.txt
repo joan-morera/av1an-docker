@@ -2,19 +2,16 @@
 av1an-0.5
 vapoursynth-R70.11
 vmaf-v3.0.0-rc
-rust-2
 
 ### Build Dependencies (Debian Sid)
 ### Automatically populated by workflow. Tracks libs and toolchain.
 aom-tools-3.13.1-2
 build-essential-12.12
-clang-1:21.1.6-69
-clang-21-1:21.1.8-1
+clang-1:21.1.6-70
 cython3-3.1.6+dfsg-2+b1
 ffmpeg-7:8.0.1-2
 ffmsindex-5.0-1+b2
 libc6-2.42-6
-libc6-dev-2.42-6
 libffms2-dev-5.0-1+b2
 librav1e-dev-0.8.1-7
 libssl-dev-3.5.4-1
